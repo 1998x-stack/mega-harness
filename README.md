@@ -1,58 +1,68 @@
 # mega-harness
 
-**Generation 3 harness — make the loop distributable. Full-featured agent execution environment.**
+**Generation 3 harness — make the loop distributable.** Current milestone:
+**M1, durable local multi-worker orchestration**. This is an implementation
+foundation, not yet a network-distributed agent runtime.
 
-> 中文一句话：harness 家族的第三条主线 Gen 3「让循环可分发」——把 tiny（循环可用）与 mid（循环可扩展）的能力整合为更完整的全家桶（多 Agent 调度 / 分布式 / 扩展包生态）。当前处于**规划/脚手架**阶段，源码尚未落地。
+`mega-harness` coordinates task execution above an Agent loop rather than
+reimplementing model reasoning. Python 3.11+; no runtime third-party dependencies.
+It is designed to later integrate `mid-harness` Agents and its hooks/MCP/skills.
 
-[![Status](https://img.shields.io/badge/status-scaffold-orange)](.)
-[![License](https://img.shields.io/badge/license-MIT-green)]()
+## Quick start
 
-`mega-harness` 是 1998x-stack harness 家族的规划中第三代。沿家族共享哲学——「agent harness 是一个记账良好的 while 循环」——三代分别解决：
-
+```bash
+python -m pip install -e .
+mega-harness --db ./tasks.sqlite3 submit --payload '{"message":"hello"}' --key example-1
+mega-harness --db ./tasks.sqlite3 worker --once
+mega-harness --db ./tasks.sqlite3 list
+# Inspect a task by ID returned from submit:
+mega-harness --db ./tasks.sqlite3 status TASK_ID
+mega-harness --db ./tasks.sqlite3 events TASK_ID
 ```
-Generation 1: Make the loop work          (tiny-harness)  ✅ 已成
-Generation 2: Make the loop extensible    (mid-harness)   ✅ 已成
-Generation 3: Make the loop distributable (mega-harness)  🚧 规划中
+
+The CLI intentionally runs only the built-in, non-executing `echo` handler.
+For a custom handler, explicitly register trusted Python callables:
+
+```python
+from mega_harness import TaskStore, Worker
+
+store = TaskStore("./tasks.sqlite3")
+task_id = store.submit("summarize", {"text": "Hello"}, idempotency_key="summary-1")
+worker = Worker(store, {"summarize": lambda payload: {"length": len(payload["text"])}})
+worker.run_once()
+print(store.get(task_id).result)
 ```
 
-> 家族核心信念：harness 只提供机械式基础设施、不做推理——智能全部来自 LLM，harness 逐步增加的是**能力而非智能**。
+Launch multiple worker processes against the same **local** database to process
+tasks concurrently. A task is claimed by only one worker at a time; heartbeat
+renewal and expiring leases allow recovery when a worker disappears. Use
+`python -m unittest discover -s tests -v` to run the offline regression suite.
 
-## 🚧 现状与规划范围
+## Guarantees and limitations
 
-**现状**：本仓库为脚手架（仅 `.git` + 本 README），实现尚待启动。
+- Durable queue, task priority, submit idempotency keys, retries with exponential
+  backoff, expiring fenced leases, heartbeat, cancellation, and replayable events.
+- **At least once, not exactly once:** a handler may run twice after an interruption.
+  Task submission idempotency does not make external handler side effects idempotent.
+- Cancelling a running task fences its result but cannot terminate already-running
+  Python code. Code must implement cooperative cancellation where necessary.
+- SQLite is intended for trusted workers on **one machine** and a local filesystem;
+  it is not the M3 remote distributed backend. Avoid untrusted handlers and secrets
+  in task payloads or event messages.
+- The CLI is a deliberately narrow demonstration. No arbitrary commands or remote
+  task code are evaluated. Full Agent/MCP/skill integration and remote workers are
+  future milestones, not shipped functionality.
 
-**规划中的能力方向（对齐 Gen3「可分发」）：**
-- **任务分发 / 多会话调度**：在 `agent-loop` 的双 Agent 跨会话基础上，扩展为可并发的任务编排
-- **可扩展包生态**：继承 mid 的 hooks / MCP / 渐进式 skills，做成可安装、可组合的插件
-- **可靠运行**：可观测性（日志 / 追踪）、进度回放、失败续跑
-- **更完整的全家桶**：loop + 调度 + 扩展包 + 工具链，一个仓库承载
+See [architecture and phased rollout](docs/architecture.md) for the M2/M3 plan.
 
-## The Harness Lineage（本系定位）
+## Harness lineage
 
-| 成员 | 阶段 | 一句话 |
-|------|------|--------|
-| `tiny-harness` | Gen 1 · 循环可用 | 最小基线：loop + tools + streaming CLI，~1,100 行 |
-| `mid-harness` | Gen 2 · 循环可扩展 | hooks / MCP / 渐进式 skills，~3,000 行 |
-| `effective-harness` | 生产 wrapper | 双 Agent 跨会话，零配置 bash+pアート |
-| **mega-harness** | Gen 3 · 循环可分发 | **本仓库**：规划中的全家桶 |
-| `agent-loop` | 多 Agent 编排 | Initializer / Executor 跨会话 |
-| `ralph-loop` / `loop-runner` | 自治循环 | 文件系统即记忆 / Generator–Evaluator |
-
-## 里程碑（规划）
-
-- [ ] M1：在 mid-harness 之上叠加多会话调度与可观测性
-- [ ] M2：插件包分发（skills / hooks / MCP server 打包安装）
-- [ ] M3：分布式执行（多 worker 分派 feature/task），延续 effective/agent-loop 的「增量可合并」约定
-
-## Development / 贡献
-
-实现启动后，本 README 将随源码充实完整章节（Quick Start、API、架构、测试）。贡献前可参考同家族的 `tiny-harness` / `mid-harness` 的工程规范与设计文档。
-
-## Related
-
-- `tiny-harness` / `mid-harness` / `effective-harness` —— 家族前几代
-- `agent-loop` / `ralph-loop` / `loop-runner` —— 同一迭代思路的姊妹项目
+| Project | Focus |
+| --- | --- |
+| tiny-harness | Make the loop work |
+| mid-harness | Make the loop extensible (hooks, MCP, skills) |
+| **mega-harness** | Make the loop distributable, starting with durable coordination |
 
 ## License
 
-MIT
+MIT. See [LICENSE](LICENSE).
